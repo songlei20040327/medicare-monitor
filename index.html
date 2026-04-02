@@ -2,106 +2,95 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>Medicare 呼吸监护平台</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Medicare</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* 自定义滚动条样式 */
+        body { padding-top: env(safe-area-inset-top); }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
-        
-        /* 避免 ECharts 在加载前高度为 0 */
-        .chart-container { min-height: 200px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden">
-
-    <nav class="bg-white border-b border-slate-100 p-4 flex justify-between items-center shrink-0 z-10 safe-area-pt">
+<body class="bg-slate-50 text-slate-900 h-screen flex flex-col overflow-hidden">
+    <nav class="bg-white border-b p-4 flex justify-between items-center shrink-0 shadow-sm">
         <div class="flex items-center gap-2">
-            <i class="fa-solid fa-truck-medical text-orange-500 text-xl"></i>
-            <h1 class="text-xl font-bold tracking-tight">Medicare <span class="text-sm font-normal text-slate-400">ICU</span></h1>
+            <i class="fa-solid fa-microchip text-orange-500 text-xl"></i>
+            <h1 class="text-xl font-black">Medicare <span class="text-slate-400 font-medium">V7</span></h1>
         </div>
-        <button id="btn-ble-connect" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-sm shadow-orange-500/20">
-            <i class="fa-brands fa-bluetooth-b"></i><span id="ble-status-nav">连接</span>
+        <button id="btn-connect" class="bg-orange-500 text-white px-5 py-2 rounded-2xl font-bold shadow-lg shadow-orange-200 active:scale-95 transition-transform">
+            <i class="fa-brands fa-bluetooth-b mr-1"></i><span id="ble-status">连接设备</span>
         </button>
     </nav>
 
-    <main class="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar space-y-4">
-        
-        <section class="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
-            <img src="https://api.dicebear.com/7.x/notionists/svg?seed=SongLei&backgroundColor=ffedd5" alt="Dr." class="w-16 h-16 rounded-full border border-orange-100 bg-orange-50">
+    <main class="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        <div class="bg-white rounded-3xl p-5 border shadow-sm flex items-center gap-4">
+            <img src="https://api.dicebear.com/7.x/notionists/svg?seed=SongLei" class="w-14 h-14 rounded-full bg-orange-50 border">
             <div>
-                <h2 class="text-lg font-bold">宋磊 <span class="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-1">主任医师</span></h2>
-                <p id="realtime-clock" class="text-sm font-mono text-slate-400 mt-1">00:00:00</p>
+                <h2 class="text-lg font-bold">宋磊 <span class="text-xs font-medium text-slate-400 ml-1">主任医师</span></h2>
+                <p id="realtime-clock" class="text-sm font-mono text-slate-400 tracking-widest">00:00:00</p>
             </div>
-        </section>
+        </div>
 
-        <section class="grid grid-cols-2 gap-4">
-            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
-                <div class="text-orange-400 bg-orange-50 w-10 h-10 rounded-full flex items-center justify-center"><i class="fa-solid fa-temperature-half"></i></div>
-                <div>
-                    <p class="text-xs text-slate-400 font-medium">温度</p>
-                    <p class="text-xl font-bold"><span id="val-temp">--</span>°C</p>
-                </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white rounded-2xl p-4 border flex items-center gap-3">
+                <i class="fa-solid fa-temperature-three-quarters text-rose-400 text-xl"></i>
+                <div><p class="text-[10px] text-slate-400 font-bold">温度</p><p class="text-lg font-black"><span id="val-temp">--</span>°C</p></div>
             </div>
-            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex items-center gap-3">
-                <div class="text-blue-400 bg-blue-50 w-10 h-10 rounded-full flex items-center justify-center"><i class="fa-solid fa-droplet"></i></div>
-                <div>
-                    <p class="text-xs text-slate-400 font-medium">湿度</p>
-                    <p class="text-xl font-bold"><span id="val-hum">--</span>%</p>
-                </div>
+            <div class="bg-white rounded-2xl p-4 border flex items-center gap-3">
+                <i class="fa-solid fa-droplet text-blue-400 text-xl"></i>
+                <div><p class="text-[10px] text-slate-400 font-bold">湿度</p><p class="text-lg font-black"><span id="val-hum">--</span>%</p></div>
             </div>
-        </section>
+        </div>
 
-        <section class="grid grid-cols-3 gap-3">
-            <div class="bg-white rounded-2xl p-3 border border-slate-100 shadow-sm relative aspect-square">
-                <span class="absolute top-2 left-2 text-[10px] font-bold text-slate-400 tracking-wider">SpO2</span>
+        <div class="grid grid-cols-3 gap-3">
+            <div class="bg-white rounded-2xl p-2 border relative aspect-square">
+                <span class="absolute top-2 left-2 text-[10px] font-bold text-slate-300">SpO2</span>
                 <div id="ring-spo2" class="w-full h-full"></div>
             </div>
-            <div class="bg-white rounded-2xl p-3 border border-slate-100 shadow-sm relative aspect-square">
-                <span class="absolute top-2 left-2 text-[10px] font-bold text-slate-400 tracking-wider">EtCO2</span>
+            <div class="bg-white rounded-2xl p-2 border relative aspect-square">
+                <span class="absolute top-2 left-2 text-[10px] font-bold text-slate-300">EtCO2</span>
                 <div id="ring-co2" class="w-full h-full"></div>
             </div>
-            <div class="bg-white rounded-2xl p-3 border border-slate-100 shadow-sm relative aspect-square">
-                <span class="absolute top-2 left-2 text-[10px] font-bold text-slate-400 tracking-wider">FiO2</span>
+            <div class="bg-white rounded-2xl p-2 border relative aspect-square">
+                <span class="absolute top-2 left-2 text-[10px] font-bold text-slate-300">FiO2</span>
                 <div id="ring-o2" class="w-full h-full"></div>
             </div>
-        </section>
+        </div>
 
-        <section class="grid grid-cols-2 gap-4">
-            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                <p class="text-xs text-slate-400 font-medium">PEEP 气道压力</p>
-                <p class="text-3xl font-black text-slate-900 mt-1"><span id="val-peep">--</span><span class="text-sm ml-1 text-slate-400">kPa</span></p>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white rounded-3xl p-5 border shadow-sm flex flex-col justify-between h-28 border-l-4 border-l-pink-400">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">心率</span>
+                <p class="text-3xl font-black text-slate-800"><span id="val-hr">--</span> <span class="text-xs font-bold">BPM</span></p>
             </div>
-            <div class="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                <p class="text-xs text-slate-400 font-medium">流量</p>
-                <p class="text-3xl font-black text-slate-900 mt-1"><span id="val-flow">--</span><span class="text-sm ml-1 text-slate-400">L/m</span></p>
+            <div class="bg-white rounded-3xl p-5 border shadow-sm flex flex-col justify-between h-28 border-l-4 border-l-blue-400">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">呼吸频率</span>
+                <p class="text-3xl font-black text-slate-800"><span id="val-rr">--</span> <span class="text-xs font-bold">RPM</span></p>
             </div>
-        </section>
+        </div>
 
-        <section class="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm relative">
-            <div class="absolute top-4 left-4 flex items-center gap-1.5 z-10">
-                <div class="w-2 h-2 rounded-full bg-rose-400"></div>
-                <h3 class="text-xs font-bold text-slate-400 tracking-widest">PPG 波形</h3>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white rounded-2xl p-4 border">
+                <p class="text-[10px] font-bold text-slate-400">PEEP</p>
+                <p class="text-xl font-black mt-1"><span id="val-peep">--</span> <span class="text-[10px]">kPa</span></p>
             </div>
-            <div id="chart-ppg" class="chart-container w-full h-48 mt-4"></div>
-        </section>
+            <div class="bg-white rounded-2xl p-4 border">
+                <p class="text-[10px] font-bold text-slate-400">实时流量</p>
+                <p class="text-xl font-black mt-1"><span id="val-flow">--</span> <span class="text-[10px]">L/m</span></p>
+            </div>
+        </div>
 
-        <section class="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm relative pb-8">
-            <div class="absolute top-4 left-4 flex items-center gap-1.5 z-10">
-                <div class="w-2 h-2 rounded-full bg-orange-400"></div>
-                <h3 class="text-xs font-bold text-slate-400 tracking-widest">气道压力曲线</h3>
-            </div>
-            <div id="chart-press" class="chart-container w-full h-48 mt-4"></div>
-        </section>
-        
-        <div class="h-6"></div>
+        <div class="bg-white rounded-3xl p-5 border shadow-sm relative">
+            <h3 class="absolute top-4 left-5 text-[10px] font-bold text-rose-400 z-10"><i class="fa-solid fa-wave-square mr-1"></i>PPG 波形</h3>
+            <div id="chart-ppg" class="w-full h-48 mt-4"></div>
+        </div>
+        <div class="bg-white rounded-3xl p-5 border shadow-sm relative">
+            <h3 class="absolute top-4 left-5 text-[10px] font-bold text-orange-400 z-10"><i class="fa-solid fa-wind mr-1"></i>气道压力</h3>
+            <div id="chart-press" class="w-full h-48 mt-4"></div>
+        </div>
+        <div class="h-10"></div>
     </main>
-
     <script type="module" src="app.js"></script>
 </body>
 </html>
