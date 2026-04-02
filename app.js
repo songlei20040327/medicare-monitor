@@ -1,196 +1,160 @@
 // ==========================================
-// 1. 初始化与 UI 管理
+// 1. 算法引擎状态 (复刻 Python 后端)
 // ==========================================
-function updateClock() {
-    const clock = document.getElementById('realtime-clock');
-    if(clock) clock.innerText = new Date().toTimeString().split(' ')[0];
-}
-setInterval(updateClock, 1000);
-updateClock();
-
-// 蓝牙 UUID (需与 ESP32 匹配)
-const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-
+const FPS = 100;
+const BUFFER_SIZE = FPS * 10;
+let ppgBuffer = { red: new Array(BUFFER_SIZE).fill(0), ir: new Array(BUFFER_SIZE).fill(0) };
+let pressBuffer = new Array(BUFFER_SIZE).fill(0);
+let lastFiltPress = 0;
 let rxBuffer = "";
-const MAX_WAVE_POINTS = 100; // 波形图保持的点数
 
-// ==========================================
-// 2. 滤波逻辑 (移植自 Python 代码)
-// ==========================================
-// 指数移动平均 (EMA) 滤波器状态
-let filteredData = {
-    press: 0,
-    spo2: 98, // 初始值假设为正常范围
-    co2: 0,
-    o2: 21,
-    alpha_wave: 0.4, // 波形滤波系数 (越小越平滑，延迟越大)
-    alpha_val: 0.1   // 数值滤波系数 (越小越平滑)
-};
+// 滤波函数：EMA 指数移动平均 (解决波形锯齿)
+const ema = (cur, last, alpha) => (alpha * cur) + (1 - alpha) * last;
 
-/**
- * 计算 EMA 滤波
- * @param {number} current_value - 当前原始值
- * @param {number} last_filtered - 上一次滤波值
- * @param {number} alpha - 滤波系数 (0-1)
- */
-function calculate_ema(current_value, last_filtered, alpha) {
-    if (last_filtered === undefined || isNaN(last_filtered)) return current_value;
-    return (current_value * alpha) + (last_filtered * (1 - alpha));
+// 寻峰函数：用于检测呼吸周期
+function findPeaks(data, distance, prominence) {
+    let peaks = [];
+    for (let i = 1; i < data.length - 1; i++) {
+        if (data[i] > data[i-1] && data[i] > data[i+1] && data[i] > prominence) {
+            if (peaks.length === 0 || i - peaks[peaks.length-1] > distance) {
+                peaks.push(i);
+            }
+        }
+    }
+    return peaks;
+}
+
+// 核心计算逻辑：心率 (自相关) 与 呼吸 (寻峰)
+function runAlgorithms() {
+    // --- 心率计算 ---
+    const irSlice = ppgBuffer.ir.slice(-400);
+    let hr = null;
+    let maxCorr = 0, bestLag = 0;
+    // 搜索 40-180 BPM 对应的延迟范围
+    for (let lag = 33; lag < 150; lag++) {
+        let corr = 0;
+        for (let i = 0; i < 250; i++) corr += irSlice[i] * irSlice[i + lag];
+        if (corr > maxCorr) { maxCorr = corr; bestLag = lag; }
+    }
+    if (maxCorr > 0) hr = Math.round((60 * FPS) / bestLag);
+
+    // --- 呼吸计算 ---
+    const pSlice = pressBuffer.slice(-800);
+    const range = Math.max(...pSlice) - Math.min(...pSlice);
+    let rr = null, peep = null;
+    if (range > 0.3) {
+        const troughs = findPeaks(pSlice.map(x => -x), FPS * 1.0, -Math.max(...pSlice));
+        if (troughs.length >= 2) {
+            rr = Math.round(60 / ((troughs[troughs.length-1] - troughs[troughs.length-2]) / FPS));
+            peep = Math.abs(pSlice[troughs[troughs.length-1]]).toFixed(1);
+        }
+    }
+    return { hr, rr, peep };
 }
 
 // ==========================================
-// 3. ECharts 初始化 (圆环 + 波形)
+// 2. 图表系统 (ECharts)
 // ==========================================
-// 圆环图辅助函数
-function createRingChart(domId, color, maxVal) {
-    let chart = echarts.init(document.getElementById(domId));
-    chart.setOption({
+function initRing(id, color, max) {
+    const c = echarts.init(document.getElementById(id));
+    c.setOption({
         series: [{
             type: 'gauge', radius: '100%', startAngle: 90, endAngle: -270,
-            pointer: { show: false }, progress: { show: true, roundCap: true, width: 10, itemStyle: { color: color } },
-            axisLine: { lineStyle: { width: 9, color: [[1, '#f1f5f9']] } },
+            pointer: { show: false }, progress: { show: true, width: 8, itemStyle: { color } },
+            axisLine: { lineStyle: { width: 8, color: [[1, '#f1f5f9']] } },
             splitLine: { show: false }, axisTick: { show: false }, axisLabel: { show: false },
-            min: 0, max: maxVal, data: [{ value: 0 }],
-            detail: { fontSize: 18, fontWeight: '900', color: '#1e293b', formatter: '{value}', offsetCenter: ['0%', '0%'] }
+            min: 0, max, detail: { fontSize: 14, fontWeight: '900', offsetCenter: [0, 0], formatter: '{value}' },
+            data: [{ value: 0 }]
         }]
     });
-    return chart;
+    return c;
 }
 
-// 波形图辅助函数
-function createWaveChart(domId, color) {
-    let chart = echarts.init(document.getElementById(domId));
-    chart.setOption({
-        animation: false,
-        grid: { left: 10, right: 10, bottom: 10, top: 35, containLabel: true },
-        xAxis: { type: 'category', show: false },
-        yAxis: { type: 'value', splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } }, scale: true, axisLabel: {color: '#94a3b8', fontSize: 10} },
-        series: [{ type: 'line', showSymbol: false, smooth: true, lineStyle: { color: color, width: 2 }, data: [] }]
-    });
-    return chart;
-}
+const chartSpo2 = initRing('ring-spo2', '#818cf8', 100);
+const chartCo2 = initRing('ring-co2', '#a78bfa', 10);
+const chartO2 = initRing('ring-o2', '#2dd4bf', 100);
 
-// 实例化图表
-const chartSpo2 = createRingChart('ring-spo2', '#818cf8', 100);
-const chartCo2 = createRingChart('ring-co2', '#a78bfa', 10);
-const chartO2 = createRingChart('ring-o2', '#2dd4bf', 100);
-const chartPPG = createWaveChart('chart-ppg', '#fb7185');
-const chartPress = createWaveChart('chart-press', '#fb923c');
-
-// 数据缓冲区
-let ppgData = new Array(MAX_WAVE_POINTS).fill(0);
-let pressData = new Array(MAX_WAVE_POINTS).fill(0);
+const optWave = (color) => ({
+    animation: false, grid: { left: 0, right: 0, top: 10, bottom: 0 },
+    xAxis: { type: 'category', show: false }, yAxis: { type: 'value', show: false, scale: true },
+    series: [{ type: 'line', showSymbol: false, smooth: true, lineStyle: { color, width: 2 }, data: [] }]
+});
+const ppgChart = echarts.init(document.getElementById('chart-ppg'));
+const pressChart = echarts.init(document.getElementById('chart-press'));
+ppgChart.setOption(optWave('#fb7185'));
+pressChart.setOption(optWave('#fb923c'));
 
 // ==========================================
-// 4. Web Bluetooth 连接 (Bluefy 专用)
+// 3. 蓝牙与数据解析 (适配 Bluefy)
 // ==========================================
-const btnConnect = document.getElementById('btn-ble-connect');
-const bleStatusNav = document.getElementById('ble-status-nav');
-
-btnConnect.onclick = async () => {
-    if (!navigator.bluetooth) {
-        alert("请在 Bluefy 浏览器中打开此页面以使用蓝牙功能");
-        return;
-    }
-
+async function startBle() {
     try {
-        bleStatusNav.innerText = "正在搜索...";
-        // 1. 请求设备
         const device = await navigator.bluetooth.requestDevice({
             filters: [{ namePrefix: 'Venti' }, { namePrefix: 'Medicare' }],
-            optionalServices: [SERVICE_UUID]
+            optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
         });
-
-        bleStatusNav.innerText = "连接中...";
-        // 2. 连接 GATT
         const server = await device.gatt.connect();
-        // 3. 获取 Service
-        const service = await server.getPrimaryService(SERVICE_UUID);
-        // 4. 获取 Characteristic (TX)
-        const characteristic = await service.getCharacteristic(TX_CHAR_UUID);
-
-        // 5. 开启通知并添加监听器
-        await characteristic.startNotifications();
-        characteristic.addEventListener('characteristicvaluechanged', (event) => {
-            // 将 ArrayBuffer 转为文本
-            const text = new TextDecoder('utf-8').decode(event.target.value);
-            handleBleRawData(text);
+        const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+        const char = await service.getCharacteristic('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
+        
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', (e) => {
+            const str = new TextDecoder().decode(e.target.value);
+            rxBuffer += str;
+            if (rxBuffer.includes('\n')) {
+                let lines = rxBuffer.split('\n');
+                rxBuffer = lines.pop();
+                lines.forEach(parseLine);
+            }
         });
-
-        // 6. 更新 UI
-        bleStatusNav.innerHTML = `<i class="fa-brands fa-bluetooth-b mr-1"></i>已连接`;
-        btnConnect.classList.replace('bg-orange-500', 'bg-emerald-500');
-        console.log("蓝牙连接完成");
-
-    } catch (error) {
-        bleStatusNav.innerText = "连接失败";
-        console.error("蓝牙错误:", error);
-    }
-};
-
-// ==========================================
-// 5. 数据处理与滤波核心
-// ==========================================
-function handleBleRawData(text) {
-    rxBuffer += text;
-    if (rxBuffer.includes('\n')) {
-        let lines = rxBuffer.split('\n');
-        rxBuffer = lines.pop(); // 保留最后一个不完整行
-        lines.forEach(line => parseFilteredLine(line.trim()));
-    }
+        document.getElementById('ble-status').innerText = "已监控";
+    } catch (err) { alert("连接失败: " + err); }
 }
 
-function parseFilteredLine(line) {
-    if (!line) return;
-    console.log("RX:", line); // Bluefy Console 可见
-
-    // 处理波形图 (高频)
+function parseLine(line) {
+    if (!line.trim()) return;
+    
+    // 模拟 Python 解析逻辑
     if (line.includes('P:')) {
-        const pMatch = line.match(/P:([-\d.]+)/);
-        if (pMatch) {
-            let rawPress = parseFloat(pMatch[1]);
-            // 应用滤波 (用于波形)
-            filteredData.press = calculate_ema(rawPress, filteredData.press, filteredData.alpha_wave);
-            
-            // 更新 UI 数字 (不滤波或使用极小 alpha)
-            document.getElementById('val-peep').innerText = rawPress.toFixed(2);
-            
-            // 更新压力波形图
-            pressData.push(filteredData.press);
-            if (pressData.length > MAX_WAVE_POINTS) pressData.shift();
-            chartPress.setOption({ series: [{ data: pressData }] });
+        const r = parseFloat(line.match(/R:([-\d.]+)/)?.[1]);
+        const i = parseFloat(line.match(/I:([-\d.]+)/)?.[1]);
+        const p = parseFloat(line.match(/P:([-\d.]+)/)?.[1]);
+
+        if (r === -1) { // 离线检测
+            document.getElementById('val-hr').innerText = '--';
+            return;
         }
+
+        ppgBuffer.red.push(r); ppgBuffer.red.shift();
+        ppgBuffer.ir.push(i); ppgBuffer.ir.shift();
+        
+        lastFiltPress = ema(p, lastFiltPress, 0.3);
+        pressBuffer.push(lastFiltPress); pressBuffer.shift();
+
+        // 更新波形
+        ppgChart.setOption({ series: [{ data: ppgBuffer.ir.slice(-100) }] });
+        pressChart.setOption({ series: [{ data: pressBuffer.slice(-100) }] });
     }
 
-    // 处理圆环数据 (EMA 平滑)
-    if (line.includes('CO2:')) {
-        // 假设原始行包含圆环和环境数据
-        // 示例: CO2:5.2 Temp:25 Hum:60
-        const co2Match = line.match(/CO2:([-\d.]+)/);
-        const tMatch = line.match(/Temp:([-\d.]+)/);
-        const hMatch = line.match(/Hum:([-\d.]+)/);
+    // 环境参数解析
+    const co2 = line.match(/CO2:([-\d.]+)/)?.[1];
+    const flow = line.match(/Flow:([-\d.]+)/)?.[1];
+    if (co2) chartCo2.setOption({ series: [{ data: [{ value: co2 }] }] });
+    if (flow) document.getElementById('val-flow').innerText = flow;
 
-        if (co2Match) {
-            let rawCo2 = parseFloat(co2Match[1]);
-            // 针对数值应用 EMA 滤波 (解决跳变)
-            filteredData.co2 = calculate_ema(rawCo2, filteredData.co2, filteredData.alpha_val);
-            chartCo2.setOption({ series: [{ data: [{ value: filteredData.co2.toFixed(1) }] }] });
-        }
-        if (tMatch) document.getElementById('val-temp').innerText = parseFloat(tMatch[1]).toFixed(1);
-        if (hMatch) document.getElementById('val-hum').innerText = parseFloat(hMatch[1]).toFixed(1);
-    }
-
-    // 处理 O2 和流量
-    if (line.includes('Flow:')) {
-        const oMatch = line.match(/O2:([-\d.]+)/);
-        const fMatch = line.match(/Flow:([-\d.]+)/);
-
-        if (oMatch) {
-            let rawO2 = parseFloat(oMatch[1]);
-            filteredData.o2 = calculate_ema(rawO2, filteredData.o2, filteredData.alpha_val);
-            chartO2.setOption({ series: [{ data: [{ value: filteredData.o2.toFixed(1) }] }] });
-        }
-        if (fMatch) document.getElementById('val-flow').innerText = parseFloat(fMatch[1]).toFixed(1);
-    }
+    // 算法节流执行 (每500ms算一次)
+    throttleAlgo();
 }
+
+let lastTick = 0;
+function throttleAlgo() {
+    if (Date.now() - lastTick < 500) return;
+    const res = runAlgorithms();
+    document.getElementById('val-hr').innerText = res.hr || '--';
+    document.getElementById('val-rr').innerText = res.rr || '--';
+    document.getElementById('val-peep').innerText = res.peep || '--';
+    lastTick = Date.now();
+}
+
+document.getElementById('btn-connect').onclick = startBle;
+setInterval(() => { document.getElementById('realtime-clock').innerText = new Date().toTimeString().split(' ')[0]; }, 1000);
