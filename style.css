@@ -1,3 +1,8 @@
+body { 
+    /* 兼容 iPhone 顶部的刘海/灵动岛 */
+    padding-top: env(safe-area-inset-top); 
+}
+
 /* 更加无形的呼吸感弥散阴影，完全对标 Apple 设计规范 */
 .shadow-sm {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
@@ -21,5 +26,3 @@
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
     background: #CBD5E1;
 }
-
-/* 删除了原有花哨的动画，使用纯净的透明度与灰度变化代表离线状态，全在 JS 的 tailwind 类中实现 */
